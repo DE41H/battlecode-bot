@@ -2,8 +2,7 @@ name: Build & Release
 
 on:
   push:
-    branches:
-      - "main"
+    branches: ["main"]
 
 permissions:
   contents: write
@@ -12,17 +11,26 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v6
-      - run: uv tool install cambc==2.1.6
-      - name: Building & Bundling Bots
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v10
+
+      - name: Install Cambc
+        run: uv tool install cambc==2.1.6
+
+      - name: Build & Bundle
         run: |
-          mkdir dist
-          for dir in bots/*/; do
-            bot=$(basename "$dir")
+          mkdir -p dist
+          find bots -mindepth 1 -maxdepth 1 -type d | xargs -n 1 -P $(nproc) -I {} bash -c '
+            set -e
+            bot=$(basename "$1")
+            echo "Building $bot..."
             cambc build "$bot"
             cambc bundle "$bot" --output "dist/$bot.zip"
-          done
+          ' _ {}
+
       - name: Publish Release
         env:
           GH_TOKEN: ${{ github.token }}
