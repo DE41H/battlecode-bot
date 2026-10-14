@@ -103,6 +103,7 @@ class Bot:
     def buy_items(self):
         # Spend only on power shards of the randomly chosen stat.
         me = cambc.me()
+        assert self.chosen_stat is not None
         item = (
             Item.POWER_SHARD_OF_STRENGTH,
             Item.POWER_SHARD_OF_FOCUS,

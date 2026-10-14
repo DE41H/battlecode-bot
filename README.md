@@ -50,7 +50,7 @@ cambc run starter-python starter-python --view   # 🎮 local match + replay
 
 | Workflow | When | What |
 |---|---|---|
-| 🧹 [`lint.yml`](.github/workflows/lint.yml) | every push | `ruff check` + `ruff format --check` |
+| 🧹 [`lint.yml`](.github/workflows/lint.yml) | pull requests + release builds | `ruff check` + `ruff format --check` + `pyright` |
 | 🏗️ [`release.yml`](.github/workflows/release.yml) | push to `main` | `cambc build` every bot → `cambc bundle` → GitHub release `build-<n>` with the ZIPs |
 
 Fix style before you push: `uv run ruff format . && uv run ruff check --fix .`

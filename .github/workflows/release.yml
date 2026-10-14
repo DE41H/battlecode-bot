@@ -5,10 +5,20 @@ on:
     branches: ["main"]
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  lint:
+    uses: ./.github/workflows/lint.yml
+
   release:
+    needs: lint
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
