@@ -9,3 +9,8 @@ dev = ["pyright"]
 
 [tool.uv]
 package = false
+
+[tool.pyright]
+extraPaths = ["sdk/python"]
+# bots run as scripts, so sibling imports like `import draft` are intended
+reportImplicitRelativeImport = false
