@@ -1,4 +1,5 @@
 """Champion decisions. main.py dispatches here after the draft."""
+
 import struct
 
 import cambc
@@ -20,9 +21,15 @@ def tiles_around(position, radius):
 
 def blocked_tiles():
     # Combine terrain and visible occupants using native bitboard operations.
-    blocked = (game_map.walls() | game_map.holes() | game_map.altars()
-               | game_map.spawn_region(Team.ENEMY) | cambc.vision.champion_tiles()
-               | cambc.vision.camp_tiles() | cambc.vision.teleport_tiles())
+    blocked = (
+        game_map.walls()
+        | game_map.holes()
+        | game_map.altars()
+        | game_map.spawn_region(Team.ENEMY)
+        | cambc.vision.champion_tiles()
+        | cambc.vision.camp_tiles()
+        | cambc.vision.teleport_tiles()
+    )
     blocked.set(cambc.me().position(), False)
     return blocked
 
@@ -54,8 +61,12 @@ def move_towards_closest(goals):
 def attack_if_in_range(target):
     # Make one basic attack if the target is already in attack range.
     me = cambc.me()
-    if (not me.can_attack() or not target.is_visible() or target.health() <= 0
-            or not me.attack_tiles().is_set(target.position())):
+    if (
+        not me.can_attack()
+        or not target.is_visible()
+        or target.health() <= 0
+        or not me.attack_tiles().is_set(target.position())
+    ):
         return False
     me.attack(target)
     return True
@@ -71,8 +82,9 @@ def farm_camps():
     goals = cambc.Bitboard()
     visible = cambc.vision.visible_tiles()
     for group in game_map.camp_groups():
-        if (not (group.spawn_tiles() & visible).is_empty()
-                and isinstance(group.state(), game_map.CampGroupRespawning)):
+        if not (group.spawn_tiles() & visible).is_empty() and isinstance(
+            group.state(), game_map.CampGroupRespawning
+        ):
             continue
         goals |= group.spawn_tiles()
 
@@ -91,8 +103,11 @@ class Bot:
     def buy_items(self):
         # Spend only on power shards of the randomly chosen stat.
         me = cambc.me()
-        item = (Item.POWER_SHARD_OF_STRENGTH, Item.POWER_SHARD_OF_FOCUS,
-                Item.POWER_SHARD_OF_HEALTH)[self.chosen_stat]
+        item = (
+            Item.POWER_SHARD_OF_STRENGTH,
+            Item.POWER_SHARD_OF_FOCUS,
+            Item.POWER_SHARD_OF_HEALTH,
+        )[self.chosen_stat]
         count = me.gold_count() // item.cost()
         if count and me.can_buy(item, count):
             me.buy(item, count)
@@ -113,8 +128,13 @@ class Bot:
         me = cambc.me()
 
         # Leave channels running and skip turns where we cannot act.
-        if (not me.is_alive() or me.is_recalling() or me.is_submitting_gems() or me.is_teleporting()
-                or (not me.can_move() and not me.can_attack())):
+        if (
+            not me.is_alive()
+            or me.is_recalling()
+            or me.is_submitting_gems()
+            or me.is_teleporting()
+            or (not me.can_move() and not me.can_attack())
+        ):
             return
 
         # Shop before leaving spawn.

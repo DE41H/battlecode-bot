@@ -15,7 +15,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@v10
+        uses: astral-sh/setup-uv@v10.3.0
 
       - name: Install Cambc
         run: uv tool install cambc==2.1.6
@@ -23,13 +23,12 @@ jobs:
       - name: Build & Bundle
         run: |
           mkdir -p dist
-          find bots -mindepth 1 -maxdepth 1 -type d | xargs -n 1 -P $(nproc) -I {} bash -c '
-            set -e
-            bot=$(basename "$1")
+          for dir in bots/*/; do
+            bot=$(basename "$dir")
             echo "Building $bot..."
             cambc build "$bot"
             cambc bundle "$bot" --output "dist/$bot.zip"
-          ' _ {}
+          done
 
       - name: Publish Release
         env:
