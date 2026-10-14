@@ -1,9 +1,9 @@
 """Champion decisions. main.py dispatches here after the draft."""
 import struct
-from randomness import below
 
 import cambc
 from cambc import game_map
+from randomness import below
 
 Team, Item = cambc.Team, cambc.ItemType
 
@@ -149,4 +149,3 @@ class Bot:
         farm_camps()
 
         me.set_priority(1 + below(100))
-
