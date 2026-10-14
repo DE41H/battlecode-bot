@@ -1,0 +1,33 @@
+name: Build & Release
+
+on:
+  push:
+    branches:
+      - "main"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv tool install cambc==2.1.6
+      - name: Building & Bundling Bots
+        run: |
+          mkdir dist
+          for dir in bots/*/; do
+            bot=$(basename "$dir")
+            cambc build "$bot"
+            cambc bundle "$bot" --output "dist/$bot.zip"
+          done
+      - name: Publish Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "build-${{ github.run_number }}" dist/*.zip \
+            --target "${{ github.sha }}" \
+            --title "Build ${{ github.run_number }} (${GITHUB_REF_NAME})" \
+            --notes "Commit ${{ github.sha }}"
