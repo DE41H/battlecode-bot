@@ -6,3 +6,4 @@ bots/*/build/
 bots/*/target/
 .venv/
 .vscode/
+.opencode/
