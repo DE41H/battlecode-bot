@@ -12,9 +12,6 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  lint:
-    uses: ./.github/workflows/lint.yml
-
   release:
     needs: lint
     permissions:
