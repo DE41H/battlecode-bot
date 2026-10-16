@@ -4,16 +4,12 @@ on:
   push:
     branches: ["main"]
 
-permissions:
-  contents: read
-
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   release:
-    needs: lint
     permissions:
       contents: write
     runs-on: ubuntu-latest
