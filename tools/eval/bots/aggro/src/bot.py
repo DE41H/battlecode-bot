@@ -1,0 +1,532 @@
+"""Champion decisions: farm the best-value camps, capture, bank gems, shop, and fight only when it pays."""
+
+import math
+
+import cambc
+import combat
+import memory
+import nav
+from knowledge import Knowledge
+from shop import shop
+
+Team, Kind, Consumable = cambc.Team, cambc.ChampionType, cambc.ConsumableType
+
+BANK_GEMS = 60
+NEAR_ALTAR = 5
+LOW_HEALTH = 0.35
+HEALED = 0.9
+# Local power ratios (ours / theirs) for taking or refusing a fight with enemy champions.
+FIGHT_EDGE = 0.8
+RETREAT_EDGE = 0.9
+# Turns we hold a contested capture before giving it up, and how long we then avoid it.
+CONTEST_TURNS = 4
+CONTEST_BACKOFF = 30
+SHOP_GOLD = 150
+CANDIDATES = 3
+# Set True in a probe copy to trace decisions in the replay's stdout.
+DEBUG = False
+
+
+def _alive(unit):
+    try:
+        return unit.is_visible() and unit.health() > 0
+    except cambc.Error:
+        return False
+
+
+class Bot:
+    def __init__(self):
+        self.k = None
+        self.plan = None
+        self.slot = None
+        self.target = None
+        self.healing = False
+        self.contested = 0
+
+    def setup(self):
+        me = cambc.me()
+        self.k = Knowledge()
+        self.plan = memory.Plan()
+        self.slot = self.plan.slot_of(me.champion_name())
+        if self.slot is None:
+            self.slot = int(me) % memory.CLAIM_SLOTS
+
+    # ------------------------------------------------------------------ turn
+
+    def play_turn(self):
+        me = cambc.me()
+        if self.k is None:
+            self.setup()
+        k = self.k
+        assert k is not None
+        k.observe()
+
+        if not me.is_alive():
+            self.healing = False
+            self.target = None
+            memory.write_claim(self.slot, None)
+            shop()
+            return
+        if me.is_submitting_gems() or me.is_recalling() or me.is_teleporting():
+            return
+
+        position = me.position()
+        at_spawn = k.ally_spawn.is_set(position)
+        if at_spawn or me.champion_name() == Kind.TAVI:
+            shop()
+
+        # Stay on spawn after a recall until healed.
+        if at_spawn and self.healing and me.health() < me.max_health() * HEALED:
+            return
+        self.healing = False
+
+        enemies = [
+            enemy for enemy in cambc.vision.champions(Team.ENEMY) if _alive(enemy)
+        ]
+        hostile_camps = [
+            camp
+            for camp in cambc.vision.camps()
+            if _alive(camp)
+            and camp.strength() > 0
+            and camp.health() < camp.max_health()
+        ]
+
+        if self.place_altar_lock(enemies):
+            pass
+
+        # Low health: recall if nothing can interrupt it, otherwise back off first.
+        if not at_spawn and me.health() < me.max_health() * LOW_HEALTH:
+            threats = [
+                e.position()
+                for e in enemies
+                if position.chebyshev_distance(e.position()) <= 6
+            ]
+            threats += [
+                c.position()
+                for c in hostile_camps
+                if position.chebyshev_distance(c.position()) <= 4
+            ]
+            if (
+                me.gem_count() > 0
+                and k.nearest_altar_distance(position) <= 2
+                and not enemies
+            ):
+                self.bank()
+                return
+            if not threats:
+                me.recall()
+                self.healing = True
+                return
+            nav.step_away(k, threats, 4)
+            return
+
+        # Fight with a clear edge, back off from a clear disadvantage, otherwise only take kill shots.
+        ratio, near = combat.local_advantage(enemies)
+        if ratio is not None:
+            if ratio >= FIGHT_EDGE and self.fight_enemies(near, aggressive=True):
+                return
+            if ratio < RETREAT_EDGE and (
+                me.gem_count() > 0 or me.health() < me.max_health() * 0.6
+            ):
+                nav.step_away(k, [enemy.position() for enemy in near], 6)
+                return
+        if self.fight_enemies(enemies):
+            return
+
+        if self.should_bank(enemies):
+            self.bank()
+            return
+
+        # Recall to spend a pile of gold when we are not carrying anything to lose.
+        if (
+            not at_spawn
+            and me.gem_count() == 0
+            and me.gold_count() >= SHOP_GOLD
+            and not hostile_camps
+            and not enemies
+            and me.champion_name() != Kind.TAVI
+            and self.target_camps() == []
+        ):
+            me.recall()
+            self.healing = True
+            return
+
+        if DEBUG and cambc.round_number() % 20 == 0:
+            print(
+                cambc.round_number(),
+                int(me.champion_name()),
+                me.position(),
+                "hp",
+                int(me.health()),
+                "gems",
+                me.gem_count(),
+                "gold",
+                me.gold_count(),
+                "target",
+                self.target,
+                "claims",
+                memory.read_claims(),
+            )
+        self.farm()
+
+    # --------------------------------------------------------------- banking
+
+    def usable_altars(self):
+        k = self.k
+        assert k is not None
+        altars = []
+        for altar in k.altars:
+            try:
+                if (
+                    cambc.vision.has_altar_lock(altar)
+                    and cambc.vision.altar_lock_at(altar).is_enemy()
+                ):
+                    continue
+            except cambc.Error:
+                pass
+            altars.append(altar)
+        return altars or k.altars
+
+    def should_bank(self, enemies):
+        me = cambc.me()
+        gems = me.gem_count()
+        if gems <= 0:
+            return False
+        k = self.k
+        assert k is not None
+        position = me.position()
+        altar_distance = k.nearest_altar_distance(position)
+        rounds_left = cambc.constants.MAX_ROUNDS - cambc.round_number()
+        if rounds_left < altar_distance * 1.4 + math.ceil(gems / 10) + 15:
+            return True
+        if (
+            cambc.global_submitted_gems(Team.ALLY) + gems
+            >= cambc.constants.WINNING_GEMS
+        ):
+            return True
+        if gems >= BANK_GEMS:
+            return True
+        if altar_distance <= NEAR_ALTAR and not self.target_camps():
+            return True
+        # Bank while our target respawns rather than idling with a full bag.
+        if self.target is not None:
+            waiting = k.available[self.target] - cambc.round_number()
+            if waiting > 0 and waiting >= altar_distance:
+                return True
+        if gems >= 10 and enemies:
+            return True
+        return me.health() < me.max_health() * 0.5
+
+    def bank(self):
+        me = cambc.me()
+        position = me.position()
+        reach = cambc.constants.SUBMIT_GEMS_RANGE
+        altars = self.usable_altars()
+        for altar in altars:
+            if position.chebyshev_distance(altar) <= reach:
+                try:
+                    me.submit_gems(altar)
+                    return
+                except cambc.Error:
+                    continue
+        goals = cambc.Bitboard()
+        for altar in altars:
+            goals |= nav.tiles_around(altar, reach)
+        nav.step_towards(self.k, goals)
+
+    # ------------------------------------------------------------------ PvP
+
+    def fight_enemies(self, enemies, aggressive=False):
+        """Take only fights we clearly win: kill shots and fat gem carriers, or anyone when aggressive."""
+        me = cambc.me()
+        if not enemies:
+            return False
+        position = me.position()
+        burst = combat.burst_estimate(me)
+        worth = []
+        for enemy in enemies:
+            try:
+                gems = enemy.gem_count()
+            except cambc.Error:
+                gems = 0
+            in_reach = position.chebyshev_distance(enemy.position()) <= max(
+                me.attack_range(), 4
+            )
+            if not in_reach:
+                continue
+            if (
+                aggressive
+                or enemy.health() <= burst
+                or (gems >= 20 and me.health() >= enemy.health() * 1.2)
+            ):
+                worth.append(enemy)
+        if not worth:
+            return False
+        target = min(worth, key=lambda enemy: enemy.health())
+        acted = combat.cast_damage([target])
+        acted = combat.basic_attack(target) or acted
+        if not acted and me.can_move():
+            acted = nav.step_towards(
+                self.k, nav.tiles_around(target.position(), me.attack_range())
+            )
+            combat.basic_attack(target)
+        return acted
+
+    def place_altar_lock(self, enemies):
+        """Cancel an enemy tribute by locking its altar."""
+        me = cambc.me()
+        try:
+            lock = me.consumables()[int(Consumable.ALTAR_LOCK)]
+            if lock.count() <= 0:
+                return False
+        except cambc.Error:
+            return False
+        k = self.k
+        assert k is not None
+        position = me.position()
+        for enemy in enemies:
+            try:
+                if not enemy.is_submitting_gems():
+                    continue
+            except cambc.Error:
+                continue
+            for altar in k.altars:
+                if (
+                    altar.chebyshev_distance(enemy.position())
+                    > cambc.constants.SUBMIT_GEMS_RANGE
+                ):
+                    continue
+                if position.chebyshev_distance(
+                    altar
+                ) > 2 or cambc.vision.has_altar_lock(altar):
+                    continue
+                try:
+                    if lock.use(altar):
+                        return True
+                except cambc.Error:
+                    continue
+        return False
+
+    # ---------------------------------------------------------------- farming
+
+    def target_camps(self):
+        if self.target is None:
+            return []
+        return [
+            camp
+            for camp in cambc.vision.camps()
+            if int(camp.camp_group()) == self.target and _alive(camp)
+        ]
+
+    def choose_target(self):
+        me = cambc.me()
+        k = self.k
+        assert k is not None and self.plan is not None
+        now = cambc.round_number()
+        position = me.position()
+        px, py = position.x, position.y
+        dps = combat.sustained_damage(me)
+        # Health we can spend per trip before retreating to heal.
+        budget = me.max_health() * (1 - LOW_HEALTH)
+        others_on = {}
+        for slot, claim in enumerate(memory.read_claims()):
+            if claim is not None and slot != self.slot:
+                others_on[claim] = others_on.get(claim, 0) + 1
+        late = now >= 700
+        available, remaining, avoid = k.available, k.remaining, k.avoid
+        capture_time = k.capture_time
+        my_zone, current = self.slot, self.target
+
+        # Python costs ~3k fuel per loop iteration here, so the loop body uses precomputed tuples only.
+        best_score, best_index, scored = -1.0, None, []
+        for (
+            index,
+            cx,
+            cy,
+            early,
+            late_value,
+            trip_cost,
+            fixed,
+            strength,
+            zone,
+        ) in k.scoring:
+            if late and late_value <= 0:
+                continue
+            team = 1 + others_on.get(index, 0)
+            kill = remaining[index] / (dps * team)
+            travel = max(abs(cx - px), abs(cy - py)) * 1.25
+            wait = max(available[index], avoid[index]) - now - travel
+            busy = travel + kill + strength * kill / team / budget * trip_cost + fixed
+            if wait > 0:
+                busy += wait
+            score = (late_value if late else early) / (busy * team + capture_time)
+            if zone == my_zone:
+                score *= 1.3
+            elif zone >= 0:
+                score *= 0.85
+            if index == current:
+                score *= 1.15
+            scored.append((score, index, travel))
+            if score > best_score:
+                best_score, best_index = score, index
+        if best_index is None or cambc.fuel_remaining() < 900_000:
+            return best_index
+
+        # Refine the best few with real walking distance, from one search out of our tile.
+        scored.sort(reverse=True)
+        field = cambc.DistanceField()
+        field.compute(k.terrain, nav.tiles_around(position, 0), cambc.Bitboard())
+        best = None
+        for score, index, estimate in scored[:CANDIDATES]:
+            walk = field.get(k.groups[index].anchor)
+            if walk >= 65535:
+                continue
+            score *= (estimate + 10) / (walk + 10)
+            if best is None or score > best[0]:
+                best = (score, index)
+        return best_index if best is None else best[1]
+
+    def farm(self):
+        cambc.me()
+        k = self.k
+        assert k is not None
+        now = cambc.round_number()
+
+        # Re-plan every few rounds or when the current target has gone stale.
+        if (
+            self.target is None
+            or k.available[self.target] > now + 25
+            or (now % 10 == int(cambc.me()) % 10 and cambc.fuel_remaining() > 1_500_000)
+        ):
+            self.target = self.choose_target()
+        memory.write_claim(self.slot, self.target)
+        if self.target is None:
+            nav.step_towards(k, k.ally_spawn)
+            return
+
+        info = k.groups[self.target]
+        camps = self.target_camps()
+        if camps:
+            self.engage(camps)
+            return
+
+        # Group in view with no living camps: capture if the reward is up, otherwise move on.
+        visible = cambc.vision.visible_tiles()
+        if not (info.tiles & visible).is_empty():
+            if k.reward_ready[self.target]:
+                self.capture(info)
+                return
+            if k.available[self.target] > now:
+                self.target = self.choose_target()
+                memory.write_claim(self.slot, self.target)
+                if self.target is None:
+                    return
+                info = k.groups[self.target]
+
+        # Never wait on spawn tiles: an occupied spawn tile freezes the whole group's respawn.
+        position = cambc.me().position()
+        if k.available[self.target] > now:
+            goals = _ring(info) & ~info.tiles
+            if info.tiles.is_set(position) or not goals.is_set(position):
+                self.travel(goals)
+            return
+        self.travel(info.tiles | _ring(info))
+
+    def travel(self, goals):
+        me = cambc.me()
+        for ability in me.abilities():
+            if (
+                ability.is_dash()
+                and ability.is_ready()
+                and nav.dash_towards(self.k, ability, goals)
+            ):
+                break
+        nav.step_towards(self.k, goals)
+
+    def capture(self, info):
+        me = cambc.me()
+        k = self.k
+        assert k is not None
+        position = me.position()
+
+        # An enemy in the region stalls the capture for everyone; fight for it or give it up.
+        intruders = [
+            enemy
+            for enemy in cambc.vision.champions(Team.ENEMY)
+            if _alive(enemy) and info.tiles.is_set(enemy.position())
+        ]
+        if intruders:
+            self.contested += 1
+            ratio, _ = combat.local_advantage(intruders, radius=8)
+            if (
+                ratio is not None
+                and ratio >= 1.0
+                and self.fight_enemies(intruders, aggressive=True)
+            ):
+                return
+            if self.contested > CONTEST_TURNS:
+                k.avoid[info.index] = cambc.round_number() + CONTEST_BACKOFF
+                self.target = None
+                self.contested = 0
+                return
+        else:
+            self.contested = 0
+
+        allies_on = [
+            ally
+            for ally in cambc.vision.champions(Team.ALLY)
+            if ally != me and info.tiles.is_set(ally.position())
+        ]
+        if info.tiles.is_set(position):
+            # Two of us on the region only splits the reward; the higher id leaves.
+            if any(int(ally) < int(me) for ally in allies_on):
+                k.captured(info.index)
+                self.target = None
+            return
+        if allies_on:
+            k.captured(info.index)
+            self.target = None
+            return
+        nav.step_towards(k, info.tiles)
+
+    def engage(self, camps):
+        me = cambc.me()
+        position = me.position()
+        under_fire = any(
+            camp.strength() > 0
+            and position.chebyshev_distance(camp.position()) <= camp.attack_range()
+            for camp in camps
+        )
+        combat.support_spells(self.k, under_fire)
+
+        # Back off before a camp kills us; it falls asleep two rounds after we leave.
+        incoming = sum(
+            camp.strength()
+            for camp in camps
+            if _alive(camp) and camp.health() < camp.max_health()
+        )
+        if incoming > 0 and me.health() < incoming * 2:
+            nav.step_away(self.k, [camp.position() for camp in camps], 4)
+            return
+
+        target = min(camps, key=lambda camp: camp.health())
+        if combat.basic_attack(target):
+            combat.cast_damage(camps)
+            return
+
+        cast = combat.cast_damage(camps)
+        if me.can_move():
+            nav.step_towards(
+                self.k, nav.tiles_around(target.position(), me.attack_range())
+            )
+        combat.basic_attack(target)
+        if not cast:
+            combat.cast_damage(camps)
+
+
+def _ring(info):
+    """Tiles next to a group's spawn tiles, so occupied camp tiles still give us somewhere to stand."""
+    ring = cambc.Bitboard()
+    for position in info.positions:
+        ring.draw_chebyshev(position, 1)
+    return ring

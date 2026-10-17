@@ -1,0 +1,3 @@
+extend = "../../pyproject.toml"
+# Patch scripts are terse one-shot text edits and bots/ holds frozen snapshots of old versions.
+extend-exclude = ["patches", "bots", "work"]
