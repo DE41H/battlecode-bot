@@ -2,7 +2,7 @@
 # usage: pool.sh XDIR [opps...] -- X vs each opponent in bots/, all maps, both sides, as one batch; prints per-opponent and total lines
 S="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 X=$(realpath "$1"); shift
-OPPS=${@:-"monoallow tribfix v6trip goldrush-bot"}
+OPPS=${@:-"v7 v6 v6trip invader monoallow goldrush-bot"}
 name=$(basename "$X")
 mkdir -p "$S/work"
 args=()

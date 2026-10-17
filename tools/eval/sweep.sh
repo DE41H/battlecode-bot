@@ -1,7 +1,7 @@
 #!/bin/bash
 # usage: OPPS="a b" sweep.sh variant... -- evaluate each bots/<variant> against OPPS in turn; summary.py tabulates
 S="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OPPS=${OPPS:-"monoallow tribfix v6trip goldrush-bot starter-python"}
+OPPS=${OPPS:-"v7 v6 v6trip invader monoallow goldrush-bot starter-python"}
 mkdir -p "$S/work"
 for v in "$@"; do
   args=()

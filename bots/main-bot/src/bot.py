@@ -390,7 +390,7 @@ class Bot:
         late = now >= 700
         available, remaining, avoid = k.available, k.remaining, k.avoid
         capture_time = k.capture_time
-        my_zone, current = self.slot, self.target
+        current = self.target
 
         # Python costs ~3k fuel per loop iteration here, so the loop body uses precomputed tuples only.
         best_score, best_index, scored = -1.0, None, []
@@ -403,7 +403,7 @@ class Bot:
             trip_cost,
             fixed,
             strength,
-            zone,
+            _zone,
         ) in k.scoring:
             if late and late_value <= 0:
                 continue
@@ -420,11 +420,8 @@ class Bot:
             )
             if wait > 0:
                 busy += wait
+            # No zone bias: lanes from the draft sent champions on long, risky walks.
             score = (late_value if late else early) / (busy * team + capture_time)
-            if zone == my_zone:
-                score *= 1.3
-            elif zone >= 0:
-                score *= 0.85
             if index == current:
                 score *= 1.15
             scored.append((score, index, travel))
