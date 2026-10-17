@@ -36,20 +36,18 @@ def walk(o):
 
 
 def group_matches(group):
+    """[(match id, status, map, our side 'teamA'/'teamB')] for a practice group."""
     text = cambc("match-groups", "show", group, "--json")
     try:
         data = json.loads(text)
     except ValueError:
         return None, text
     matches = []
-    for _key, v in walk(data):
-        if (
-            isinstance(v, dict)
-            and UUID.fullmatch(str(v.get("id", "")))
-            and "status" in v
-            and v["id"] != group
-        ):
-            matches.append((v["id"], v["status"]))
+    for m in data.get("matches", []):
+        side = next(
+            ("team" + t["side"].upper() for t in m["teams"] if t["teamId"] == ME), None
+        )
+        matches.append((m["matchId"], m["status"], m["map"], side))
     return data, matches
 
 
@@ -66,34 +64,35 @@ def report(group):
         if matches and not pending:
             break
         print(
-            f"{time.strftime('%H:%M:%S')} waiting: {len(pending)} of {len(matches)} matches pending"
+            f"{time.strftime('%H:%M:%S')} waiting: {len(pending)} of {len(matches)} pending",
+            flush=True,
         )
         time.sleep(30)
     wins = 0
-    for mid, status in matches:
+    for mid, status, mapname, side in matches:
         path = os.path.join(OUT, mid + ".json")
         if not os.path.exists(path):
             cambc("matches", "summary", mid, "--json", "--output", path)
-        shown = cambc("matches", "show", mid)
-        lines = shown.splitlines()
-        side = None
-        for i, line in enumerate(lines[1:3]):
-            if ME in line:
-                side = ("teamA", "teamB")[i]
         try:
             with open(path) as f:
                 d = json.load(f)
         except (OSError, ValueError):
-            print(mid, status, "no summary")
+            print(f"{mapname:12s} {status} (no summary)")
             continue
         gems = {t["team"]: int(t["submittedGems"]) for t in d["teams"]}
         other = "teamB" if side == "teamA" else "teamA"
         won = d["match"]["outcome"] == side
         wins += won
-        mapname = lines[0].split()[-1] if lines else "?"
+        deaths = {
+            t: sum(
+                int(c["metrics"]["deaths"]) for c in d["champions"] if c["team"] == t
+            )
+            for t in (side, other)
+        }
         print(
             f"{mapname:12s} {'WIN ' if won else 'loss'} r{d['match']['roundsCompleted']:4d} "
-            f"gems {gems.get(side, 0):4d}-{gems.get(other, 0):4d} (we were {side})"
+            f"gems {gems.get(side, 0):4d}-{gems.get(other, 0):4d} deaths {deaths[side]:2d}-{deaths[other]:2d} "
+            f"(we were {side})"
         )
     print(f"group {group}: {wins}/{len(matches)}")
 
@@ -107,7 +106,8 @@ def main():
     print(text[:800])
     try:
         data = json.loads(text)
-        groups = [data["id"]] if UUID.fullmatch(str(data.get("id", ""))) else []
+        group = data.get("groupId") or data.get("id")
+        groups = [group] if UUID.fullmatch(str(group or "")) else []
     except (ValueError, AttributeError):
         groups = []
     if not groups:
