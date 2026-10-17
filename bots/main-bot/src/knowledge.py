@@ -4,10 +4,7 @@ import cambc
 import memory
 from cambc import game_map
 
-Team, CampType = cambc.Team, cambc.CampType
-
-# Camp group kinds the economy ignores until the late game.
-MONOLITH = CampType.MONOLITH
+Team = cambc.Team
 
 
 class GroupInfo:
@@ -25,7 +22,6 @@ class GroupInfo:
         self.max_health = sum(camp.base_stats().base_health for camp in camps)
         # Gem and gold clusters have no strength, so a pure cluster group is harmless.
         self.strength = sum(camp.base_stats().base_strength for camp in camps)
-        self.has_monolith = any(camp.kind() == MONOLITH for camp in camps)
         xs = [p.x for p in self.positions]
         ys = [p.y for p in self.positions]
         # Plain ints: Python arithmetic is far cheaper in fuel than SDK calls in hot loops.
@@ -79,8 +75,6 @@ class Knowledge:
         recall = cambc.constants.RECALL_TIME
         table = []
         for info in self.groups:
-            if info.has_monolith:
-                continue
             zone = zones[info.index] if info.index < len(zones) else memory.SHARED
             table.append(
                 (

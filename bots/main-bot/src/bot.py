@@ -16,7 +16,7 @@ NEAR_ALTAR = 5
 LOW_HEALTH = 0.35
 HEALED = 0.9
 # Local power ratios (ours / theirs) for taking or refusing a fight with enemy champions.
-FIGHT_EDGE = 1.2
+FIGHT_EDGE = 0.8
 RETREAT_EDGE = 0.9
 # Turns we hold a contested capture before giving it up, and how long we then avoid it.
 CONTEST_TURNS = 4
@@ -54,6 +54,26 @@ class Bot:
     # ------------------------------------------------------------------ turn
 
     def play_turn(self):
+        mode = self.decide()
+        if DEBUG:
+            me = cambc.me()
+            print(
+                cambc.round_number(),
+                int(me),
+                int(me.champion_name()),
+                me.position().x,
+                me.position().y,
+                int(me.health()),
+                me.gem_count(),
+                me.gold_count(),
+                self.target,
+                len(cambc.vision.champions(Team.ENEMY)),
+                len(cambc.vision.champions(Team.ALLY)),
+                mode,
+            )
+
+    def decide(self):
+        """Take this turn's actions; returns a short label of what we chose."""
         me = cambc.me()
         if self.k is None:
             self.setup()
@@ -66,9 +86,9 @@ class Bot:
             self.target = None
             memory.write_claim(self.slot, None)
             shop()
-            return
+            return "dead"
         if me.is_submitting_gems() or me.is_recalling() or me.is_teleporting():
-            return
+            return "channel"
 
         position = me.position()
         at_spawn = k.ally_spawn.is_set(position)
@@ -77,7 +97,7 @@ class Bot:
 
         # Stay on spawn after a recall until healed.
         if at_spawn and self.healing and me.health() < me.max_health() * HEALED:
-            return
+            return "heal"
         self.healing = False
 
         enemies = [
@@ -112,30 +132,39 @@ class Bot:
                 and not enemies
             ):
                 self.bank()
-                return
+                return "low-bank"
             if not threats:
                 me.recall()
                 self.healing = True
-                return
+                return "low-recall"
+            # Walking away from a chaser only feeds it free hits, so trade back while we still can.
+            pressing = [
+                enemy
+                for enemy in enemies
+                if position.chebyshev_distance(enemy.position())
+                <= enemy.attack_range() + 1
+            ]
+            if pressing and self.fight_enemies(pressing, aggressive=True):
+                return "last-stand"
             nav.step_away(k, threats, 4)
-            return
+            return "low-flee"
 
         # Fight with a clear edge, back off from a clear disadvantage, otherwise only take kill shots.
         ratio, near = combat.local_advantage(enemies)
         if ratio is not None:
             if ratio >= FIGHT_EDGE and self.fight_enemies(near, aggressive=True):
-                return
+                return "fight"
             if ratio < RETREAT_EDGE and (
                 me.gem_count() > 0 or me.health() < me.max_health() * 0.6
             ):
                 nav.step_away(k, [enemy.position() for enemy in near], 6)
-                return
+                return "retreat"
         if self.fight_enemies(enemies):
-            return
+            return "snipe"
 
         if self.should_bank(enemies):
             self.bank()
-            return
+            return "bank"
 
         # Recall to spend a pile of gold when we are not carrying anything to lose.
         if (
@@ -149,25 +178,9 @@ class Bot:
         ):
             me.recall()
             self.healing = True
-            return
+            return "shop-recall"
 
-        if DEBUG and cambc.round_number() % 20 == 0:
-            print(
-                cambc.round_number(),
-                int(me.champion_name()),
-                me.position(),
-                "hp",
-                int(me.health()),
-                "gems",
-                me.gem_count(),
-                "gold",
-                me.gold_count(),
-                "target",
-                self.target,
-                "claims",
-                memory.read_claims(),
-            )
-        self.farm()
+        return self.farm()
 
     # --------------------------------------------------------------- banking
 
@@ -402,25 +415,25 @@ class Bot:
         memory.write_claim(self.slot, self.target)
         if self.target is None:
             nav.step_towards(k, k.ally_spawn)
-            return
+            return "idle"
 
         info = k.groups[self.target]
         camps = self.target_camps()
         if camps:
             self.engage(camps)
-            return
+            return "engage"
 
         # Group in view with no living camps: capture if the reward is up, otherwise move on.
         visible = cambc.vision.visible_tiles()
         if not (info.tiles & visible).is_empty():
             if k.reward_ready[self.target]:
                 self.capture(info)
-                return
+                return "capture"
             if k.available[self.target] > now:
                 self.target = self.choose_target()
                 memory.write_claim(self.slot, self.target)
                 if self.target is None:
-                    return
+                    return "idle"
                 info = k.groups[self.target]
 
         # Never wait on spawn tiles: an occupied spawn tile freezes the whole group's respawn.
@@ -429,8 +442,9 @@ class Bot:
             goals = _ring(info) & ~info.tiles
             if info.tiles.is_set(position) or not goals.is_set(position):
                 self.travel(goals)
-            return
+            return "wait"
         self.travel(info.tiles | _ring(info))
+        return "travel"
 
     def travel(self, goals):
         me = cambc.me()
