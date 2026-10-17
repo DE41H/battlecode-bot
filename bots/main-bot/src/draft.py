@@ -9,16 +9,17 @@ from memory import SHARED, encode_plan
 Pick, Team = cambc.ChampionDraft, cambc.Team
 
 # Picks are simultaneous and not exclusive, so this is purely our preferred composition.
+# The top of the ladder converges on Cassi & Issac, Stellar, Ren, Varg and Ryth.
 PRIORITY = [
-    Pick.VENDETTA,
     Pick.CASSI_AND_ISSAC,
+    Pick.STELLAR,
+    Pick.REN,
     Pick.VARG,
     Pick.RYTH,
-    Pick.MARCELLA,
     Pick.TAVI,
-    Pick.STELLAR,
+    Pick.VENDETTA,
+    Pick.MARCELLA,
     Pick.VESPER_VALE,
-    Pick.REN,
     Pick.PRISM,
     Pick.WILLOW,
 ]

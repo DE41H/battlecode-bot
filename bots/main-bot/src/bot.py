@@ -14,6 +14,8 @@ Team, Kind, Consumable = cambc.Team, cambc.ChampionType, cambc.ConsumableType
 BANK_GEMS = 60
 NEAR_ALTAR = 5
 LOW_HEALTH = 0.35
+# Cassi and Issac die together, so either one falling costs both bodies and both bags.
+LINKED_LOW_HEALTH = 0.5
 HEALED = 0.9
 # Local power ratios (ours / theirs) for taking or refusing a fight with enemy champions.
 FIGHT_EDGE = 0.8
@@ -23,6 +25,8 @@ CONTEST_TURNS = 4
 CONTEST_BACKOFF = 30
 SHOP_GOLD = 150
 CANDIDATES = 3
+# Rounds we hold off banking after being hit by an attacker we cannot see.
+AMBUSH_BACKOFF = 10
 # Set True in a probe copy to trace decisions in the replay's stdout.
 DEBUG = False
 
@@ -42,6 +46,9 @@ class Bot:
         self.target = None
         self.healing = False
         self.contested = 0
+        # Health at the start of our last turn, to measure damage taken since.
+        self.last_health = None
+        self.bank_after = 0
 
     def setup(self):
         me = cambc.me()
@@ -84,10 +91,24 @@ class Bot:
         if not me.is_alive():
             self.healing = False
             self.target = None
+            self.last_health = None
             memory.write_claim(self.slot, None)
             shop()
             return "dead"
-        if me.is_submitting_gems() or me.is_recalling() or me.is_teleporting():
+        health = me.health()
+        damage = (
+            0.0 if self.last_health is None else max(0.0, self.last_health - health)
+        )
+        self.last_health = health
+
+        if me.is_submitting_gems():
+            # Damage does not stop a tribute, so a carrier under fire can die a turn short and hand the killer its whole bag.
+            if damage > 0 and health <= damage * (me.remaining_channel_time() + 1):
+                me.cancel_submit_gems()
+                self.bank_after = cambc.round_number() + AMBUSH_BACKOFF
+            else:
+                return "channel"
+        elif me.is_recalling() or me.is_teleporting():
             return "channel"
 
         position = me.position()
@@ -114,8 +135,27 @@ class Bot:
         if self.place_altar_lock(enemies):
             pass
 
+        # Hit by something we cannot see, such as an enemy in a bush: carry the bag away from it.
+        if (
+            damage > 0
+            and me.gem_count() > 0
+            and not at_spawn
+            and not enemies
+            and not any(
+                position.chebyshev_distance(camp.position()) <= camp.attack_range()
+                for camp in hostile_camps
+            )
+        ):
+            self.bank_after = max(
+                self.bank_after, cambc.round_number() + AMBUSH_BACKOFF
+            )
+            nav.step_towards(k, k.ally_spawn)
+            return "ambushed"
+
         # Low health: recall if nothing can interrupt it, otherwise back off first.
-        if not at_spawn and me.health() < me.max_health() * LOW_HEALTH:
+        linked = me.champion_name() in (Kind.CASSI, Kind.ISSAC)
+        low = LINKED_LOW_HEALTH if linked else LOW_HEALTH
+        if not at_spawn and me.health() < me.max_health() * low:
             threats = [
                 e.position()
                 for e in enemies
@@ -212,6 +252,8 @@ class Bot:
         rounds_left = cambc.constants.MAX_ROUNDS - cambc.round_number()
         if rounds_left < altar_distance * 1.4 + math.ceil(gems / 10) + 15:
             return True
+        if cambc.round_number() < self.bank_after:
+            return False
         if (
             cambc.global_submitted_gems(Team.ALLY) + gems
             >= cambc.constants.WINNING_GEMS
@@ -369,7 +411,13 @@ class Bot:
             kill = remaining[index] / (dps * team)
             travel = max(abs(cx - px), abs(cy - py)) * 1.25
             wait = max(available[index], avoid[index]) - now - travel
-            busy = travel + kill + strength * kill / team / budget * trip_cost + fixed
+            # Camps die one at a time and spread their hits, so a clear costs about a quarter of strength x kill time.
+            busy = (
+                travel
+                + kill
+                + 0.25 * strength * kill / team / budget * trip_cost
+                + fixed
+            )
             if wait > 0:
                 busy += wait
             score = (late_value if late else early) / (busy * team + capture_time)
