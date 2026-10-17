@@ -1,2 +1,2 @@
-sdk_version = "2.2.4"
-languages = ["python"]
+sdk_version = "2.2.5"
+languages = ["rust","python","ocaml"]

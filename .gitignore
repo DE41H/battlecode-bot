@@ -7,3 +7,4 @@ bots/*/target/
 .venv/
 .vscode/
 .opencode/
+*.zip
