@@ -7,7 +7,7 @@ Context for picking up work on `bots/main-bot` in a fresh session. Read this fir
 | What | State |
 |---|---|
 | `main` / platform submission v6 | The commit that added these notes. On top of v5 (`a74698f`): tribute abort and unseen-attacker escape, Cassi & Issac retreat at 50% HP (`LINKED_LOW_HEALTH`), camp-damage term in target scoring cut to 0.25×, and the ladder-meta draft `Cassi & Issac, Stellar, Ren, Varg, Ryth`. |
-| v6 vs earlier versions | 254/374 against 11 opponents. Wins 23/34 against `tribfix`, 20/34 against v5 and 29/34 against goldrush; farms about 13% faster than v5 against the starter. |
+| v6 vs earlier versions | 254/374 against 11 opponents. Wins 23/34 against `tribfix`, 20/34 against v5 and 29/34 against goldrush; farms about 10% faster than v5 against the starter (22,960 vs 25,635 total rounds over 34 games). |
 | Eval tooling | `tools/eval/`, committed. A 102-game pool takes about a minute (it used to take about 20). |
 | Snapshots | `tools/eval/bots/v6` = this submission; `v6trip` = runner-up (`trip125` instead of the 0.25× factor; beats v6 21/34 head to head but loses on the wider pool). |
 
@@ -26,7 +26,7 @@ The user's git workflow: pull first and resolve conflicts, one-line commit messa
 ## Game facts learned by experiment (not obvious from the rules)
 
 - **The engine is fully deterministic**, including across `--jobs` counts and `--release`. A mirror match always splits exactly by side. Any code change reshuffles outcomes chaotically, so judge changes on many games (≈170+), never a single map. Even comment-only edits change a few games on fuel-tight maps (`lanes`, `swirl`, `stampede`), because source size changes the first turn's fuel.
-- **The top of the ladder is a farming race.** Top teams finish `rows` in about 350 rounds, `lanes` in about 420 and `monolith` in about 410, with 0–4 deaths a game; `contest` is the exception (about 1,500 rounds, dozens of deaths). v6 needs about 520 (`rows`) and 490–520 (`lanes`) against the starter, so farming speed is still the main gap. Use `cambc matches list` and `cambc matches summary <id> --json -o f.json` to study their games: the stats JSON has per-champion gems, gold, damage and items, plus a submitted-gems timeline.
+- **The top of the ladder is a farming race.** Top teams finish `rows` in about 350 rounds, `lanes` in about 420 and `monolith` in about 410, with 0–4 deaths a game; `contest` is the exception (about 1,500 rounds, dozens of deaths). v6 needs 500–520 (`rows`) and 510–545 (`lanes`) against the starter, so farming speed is still the main gap. Use `cambc matches list` and `cambc matches summary <id> --json -o f.json` to study their games: the stats JSON has per-champion gems, gold, damage and items, plus a submitted-gems timeline.
 - **The ladder meta draft** is Cassi & Issac + Stellar in nearly every top team, then Ren, Varg and Ryth (sometimes Tavi). Copying it was worth about 9 wins in 170 on its own and stacked with the farming fix. Draft enum: 0 Ryth, 1 Vesper, 2 Vendetta, 3 C&I, 4 Stellar, 5 Prism, 6 Marcella, 7 Willow, 8 Ren, 9 Varg, 10 Tavi.
 - **Where champion turns go** (`profile.sh` vs the starter): `tribfix` waited 27%, engaged 22%, travelled 17%, walked to altars 11%, captured 10%, channelled 5% and was dead 4%. v6 waits 16%, engages 25%, travels 22%, walks to altars 11%, captures 9% and channels 7%.
 - **The camp-damage cost was about 9× too high.** The scoring charged strength × kill time of recall trips, but a near-solo wolf-pack clear costs about 300–380 HP, not about 1,600. That made solo targets look terrible, so on `rows` all five champions sat on one group for the whole game while three of them earned no gems or gold at all. 0.25× is the best of 0, 0.15, 0.25, 0.35, 0.5 and 1. **0 is catastrophic** (64/170): the term is what keeps champions off monoliths early.
@@ -96,4 +96,4 @@ Gotchas:
 2. Retest the never-tested-on-v6 patches (`bank40`, `bank100`, `shop90`, `waitpen`, `nozone`, PvP ones) with `BASE=../../bots/main-bot`.
 3. Understand why `v6trip` beats v6 head to head while losing on the wider pool; a mix of `trip125` and a factor between 0.25 and 0.5 may be better than either.
 4. Kill speed: `splash` was neutral on its own; combined with faster target rotation it may pay off.
-5. Monolith timing on `contest`: commit earlier and escort the carrier; v6 already finishes it in about 1,250 rounds against the starter (v5: about 1,900).
+5. Monolith timing on `contest`: commit earlier and escort the carrier; v6 finishes it in 1,140–1,270 rounds against the starter (v5: 1,550–1,650).
