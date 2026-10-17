@@ -55,6 +55,17 @@ def summarize(path):
         per[s]["kills"] += int(m["kills"])
         per[s]["gold"] += int(m["earnedGold"])
         per[s]["deaths"] += int(m["deaths"])
+    for event in d.get("events", []):
+        if event.get("kind") != "gemLoss":
+            continue
+        owner = event.get("owner", {}).get("team")
+        if owner in side:
+            lost = sum(
+                int(entry.get("value", 0))
+                for entry in event.get("entries", [])
+                if entry.get("context") == "champion"
+            )
+            per[side[owner]]["lostGems"] = per[side[owner]].get("lostGems", 0) + lost
     for pick in d["roster"]["draft"]:
         per[side[pick["team"]]]["draft"].append(pick["champion"])
     faults = d.get("diagnostics", {}).get("botFaults", {})
@@ -167,7 +178,7 @@ def main():
         print(
             f"{r['map']:12s} X={s} {'WIN ' if won else 'loss'} r{r['round']:4d}  "
             f"gems {rx['gems']:4d}-{ry['gems']:4d}  kills {rx['kills']:2d}-{ry['kills']:2d}  "
-            f"deaths {rx['deaths']:2d}-{ry['deaths']:2d}  gold {rx['gold']:5d}-{ry['gold']:5d}  "
+        f"deaths {rx['deaths']:2d}-{ry['deaths']:2d}  lost {rx.get('lostGems', 0):4d}-{ry.get('lostGems', 0):4d}  gold {rx['gold']:5d}-{ry['gold']:5d}  "
             f"crash {rx['crashes']}/{ry['crashes']}  vs {r['opp']}  [{', '.join(rx['draft'])}]"
         )
     print()
