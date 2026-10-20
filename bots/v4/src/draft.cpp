@@ -1,20 +1,39 @@
 #include <cambc.h>
 #include "draft.h"
+
 #include <algorithm>
-#include <string_view>
+#include <array>
+#include <cstdint>
 #include <vector>
-#include "random.h"
 
 void play_draft() {
-    // Choose randomly from the champions our team has not picked.
-    const auto chosen = cambc::draft::current_draft(cambc::team::ally);
-    std::vector<cambc::champion_draft> available;
-    for (int i = 0; i < 11; ++i) { // Released champions only.
-        auto pick = static_cast<cambc::champion_draft>(i);
-        if (std::find(chosen.begin(), chosen.end(), pick) == chosen.end()) available.push_back(pick);
-    }
+    using cambc::champion_draft;
+    constexpr std::array priority{
+        champion_draft::cassi_and_issac,
+        champion_draft::stellar,
+        champion_draft::ren,
+        champion_draft::varg,
+        champion_draft::ryth,
+        champion_draft::tavi,
+        champion_draft::vendetta,
+        champion_draft::marcella,
+        champion_draft::vesper_vale,
+        champion_draft::prism,
+        champion_draft::willow,
+    };
 
-    // Draft memory starts at byte zero and is copied to each champion.
-    cambc::draft_memory = std::string_view("hello world");
-    cambc::draft::pick(available.at(random_number(available.size())));
+    const auto chosen = cambc::draft::current_draft(cambc::team::ally);
+    const auto next = std::find_if(priority.begin(), priority.end(), [&](champion_draft pick) {
+        return std::find(chosen.begin(), chosen.end(), pick) == chosen.end();
+    });
+    if (next == priority.end())
+        return;
+
+    cambc::draft::pick(*next);
+    std::vector<std::uint8_t> memory{1, static_cast<std::uint8_t>(chosen.size() + 1)};
+    for (const auto pick : chosen)
+        memory.push_back(static_cast<std::uint8_t>(pick));
+    memory.push_back(static_cast<std::uint8_t>(*next));
+    memory.push_back(0);
+    cambc::draft_memory = memory;
 }
