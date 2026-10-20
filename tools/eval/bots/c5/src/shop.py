@@ -1,0 +1,95 @@
+"""Build orders: which shards each champion buys, and consumables to keep stocked."""
+
+import cambc
+
+Item, Kind, Consumable = cambc.ItemType, cambc.ChampionType, cambc.ConsumableType
+
+# Each step is (shard, total copies wanted); five shards combine into that family's emblem.
+# Totals count every copy of that shard, so a second step for the same shard buys another emblem.
+# Tank builds copy Mommy Shogun (36/50 on engine 1.0.0): Jungle first, then Durability and Bruiser.
+# Locally they beat v1's Monster/Power builds 31/42 head to head, 40/42 together with wards.
+J_H, J_S = Item.JUNGLE_SHARD_OF_HEALTH, Item.JUNGLE_SHARD_OF_STRENGTH
+D_S, D_H, D_F = (
+    Item.DURABILITY_SHARD_OF_STRENGTH,
+    Item.DURABILITY_SHARD_OF_HEALTH,
+    Item.DURABILITY_SHARD_OF_FOCUS,
+)
+B_S, B_H, B_F = (
+    Item.BRUISER_SHARD_OF_STRENGTH,
+    Item.BRUISER_SHARD_OF_HEALTH,
+    Item.BRUISER_SHARD_OF_FOCUS,
+)
+M_S = Item.MONSTER_SHARD_OF_STRENGTH
+
+TANK_MELEE = [(J_H, 5), (D_S, 5), (B_H, 5), (M_S, 5), (B_H, 10), (B_S, 60)]
+TANK_REN = [(J_H, 5), (B_H, 5), (D_S, 5), (B_H, 10), (B_S, 60)]
+TANK_RYTH = [(J_H, 5), (D_S, 5), (B_H, 60)]
+TANK_VARG = [(J_S, 5), (D_H, 5), (B_S, 10), (B_H, 5), (B_S, 60)]
+TANK_CASTER = [(B_F, 10), (B_H, 5), (B_F, 15), (D_F, 5), (B_F, 60)]
+# v1's builds, still used by the champions we have not tuned (and as the fallback).
+STRENGTH_FARMER = [
+    (Item.MONSTER_SHARD_OF_STRENGTH, 5),
+    (Item.JUNGLE_SHARD_OF_HEALTH, 5),
+    (Item.POWER_SHARD_OF_STRENGTH, 60),
+]
+CASTER = [
+    (Item.MONSTER_SHARD_OF_FOCUS, 5),
+    (Item.JUNGLE_SHARD_OF_HEALTH, 5),
+    (Item.POWER_SHARD_OF_FOCUS, 60),
+]
+GOLD_FARMER = [
+    (Item.TREASURE_SHARD_OF_STRENGTH, 5),
+    (Item.MONSTER_SHARD_OF_STRENGTH, 5),
+    (Item.POWER_SHARD_OF_STRENGTH, 60),
+]
+
+BUILDS = {
+    Kind.VENDETTA: TANK_MELEE,
+    Kind.ISSAC: TANK_MELEE,
+    Kind.MARCELLA: TANK_MELEE,
+    Kind.REN: TANK_REN,
+    Kind.RYTH: TANK_RYTH,
+    Kind.VARG: TANK_VARG,
+    Kind.VESPER_VALE: GOLD_FARMER,
+    Kind.STELLAR: TANK_CASTER,
+    Kind.PRISM: TANK_CASTER,
+    Kind.CASSI: TANK_CASTER,
+    Kind.TAVI: TANK_CASTER,
+    Kind.WILLOW: CASTER,
+}
+
+# Emblem produced by five shards of a kind; owned emblems count as five shards each.
+_EMBLEM = {Item(i): Item(i + 1) for i in range(0, Item.COUNT, 2)}
+
+
+def owned(counts, shard):
+    return counts[int(shard)] + shard.combine_count() * counts[int(_EMBLEM[shard])]
+
+
+def shop():
+    """Spend gold down the champion's build order; keep an altar lock in stock."""
+    me = cambc.me()
+    build = BUILDS.get(me.champion_name(), STRENGTH_FARMER)
+
+    # An altar lock is cheap insurance for denying enemy tributes.
+    try:
+        if me.gold_count() >= 40 and me.can_buy(Consumable.ALTAR_LOCK):
+            me.buy(Consumable.ALTAR_LOCK)
+    except cambc.Error:
+        pass
+
+    for shard, wanted in build:
+        counts = me.item_count()
+        missing = wanted - owned(counts, shard)
+        if missing <= 0:
+            continue
+        count = min(missing, me.gold_count() // shard.cost())
+        if count <= 0:
+            return
+        try:
+            if me.can_buy(shard, count):
+                me.buy(shard, count)
+        except cambc.Error:
+            return
+        if count < missing:
+            return
