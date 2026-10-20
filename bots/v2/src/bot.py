@@ -1,4 +1,4 @@
-"""Champion decisions: farm the best-value camps, capture, bank gems, shop, ward ahead, and fight only when it pays."""
+"""Champion decisions: farm the best-value camps, capture, bank gems, shop, ward ahead, and never farm under fire."""
 
 import math
 
@@ -20,6 +20,8 @@ HEALED = 0.9
 # Local power ratios (ours / theirs) for taking or refusing a fight with enemy champions.
 FIGHT_EDGE = 0.8
 RETREAT_EDGE = 0.9
+# An enemy that can reach us is fought at this ratio or better, and fled below it.
+PRESS_EDGE = 0.5
 # Turns we hold a contested capture before giving it up, and how long we then avoid it.
 CONTEST_TURNS = 4
 CONTEST_BACKOFF = 30
@@ -206,6 +208,19 @@ class Bot:
             ):
                 nav.step_away(k, [enemy.position() for enemy in near], 6)
                 return "retreat"
+        if ratio is not None:
+            pressing = [
+                enemy
+                for enemy in near
+                if position.chebyshev_distance(enemy.position())
+                <= max(enemy.attack_range(), 4) + 1
+            ]
+            if pressing:
+                if ratio >= PRESS_EDGE and self.fight_enemies(pressing, aggressive=True):
+                    return "pressed-fight"
+                if ratio < PRESS_EDGE:
+                    nav.step_away(k, [enemy.position() for enemy in near], 6)
+                    return "pressed-retreat"
         if self.fight_enemies(enemies):
             return "snipe"
 

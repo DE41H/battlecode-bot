@@ -118,9 +118,24 @@ Probe bots timed the same operations with `fuel_remaining()` (Python gets 2.5M p
 
 So C++ has about the same budget for distance fields and 2–3× more for everything else. v2 uses a median 0.71M of 2.5M per turn (p90 1.46M, p99 1.92M) and is capped on 0.1% of turns; the fuel gates (re-plan > 1.5M, refine > 0.9M, ward > 1.2M) skip work on about 8% of turns. Compute is not what loses games, so a port alone would not make the bot stronger; it pays only for compute-hungry features (fight simulation, every-turn re-planning).
 
+## Never farm under fire (`pressed`, 2026-10-20)
+
+Our own mirror reproduces the ladder pattern: on `elk_arena` the side that loses the opening brawl dies about 90 times to the winner's 11–29. Respawn waves (`wave`: wait on spawn for allies due back within 15 rounds) did not help (1/6 vs v2). A full trace of the opening fight showed why the loser bleeds: with enemies a few tiles away but the local power ratio under `FIGHT_EDGE` (0.8), `decide()` fell through to farming unless the champion carried gems or was under 60% health. Cassi and Issac kept capturing gold clusters and Ren and Ryth kept hitting camps while the enemy team hit them; Varg fought five alone.
+
+Fix: an enemy within `max(its attack range, 4) + 1` of us is fought when the ratio is at least `PRESS_EDGE`, and fled below it. Never keep farming while something can hit us.
+
+| Variant | Pool (v2, c4, c3, safe, c2, v7, v6trip, invader, monoallow, goldrush; 420) | vs v2 | Deaths/game |
+|---|---|---|---|
+| v2 (version 13) | — | — | 27.2 |
+| `pressed`, PRESS_EDGE 0.35 | 344 | 19/42 | 24.4 |
+| **`pressed`, 0.5** | **367** | **27/42 (+10.1k)** | 23.0 |
+| `pressed`, 0.7 | 362 | 26/42 | 23.1 |
+
+On the 8-opponent pool without v2/c4: 314/336 (v2: 288), better on 18 of 21 maps; elk_arena 12/16 → 16/16, contest 13 → 16, big-world 13 → 16. 0.5 is in `bots/v2`.
+
 ## Next
 
-- Team fights / trickle-feeding: the main cause of ranked losses (26 of 36).
+- Watch ranked results after submitting `pressed`; elk_arena, eight and lanes were the worst ranked maps.
 - Farming speed: Mommy Shogun beat us on `corners` and `elkring` with 0–2 deaths, so the gap there is pure farming, not fighting.
 - Team fights on `hooks`/`contest`: grouping heuristics keep losing locally; our pool may simply not reward them (every pool bot trickle-feeds too).
 - Deaths are still 27/game locally. Mommy-style avoidance (use ward sightings to leave a camp before the enemy arrives) is the untested half of the "safe farmer".
