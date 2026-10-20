@@ -1,9 +1,9 @@
 #!/bin/bash
-# usage: trace.sh MAP [OPP] -- current main-bot with DEBUG on (plus visible camp HP) as team A; cleaned trace in work/runs/tr-MAP/a.txt
+# usage: trace.sh MAP [OPP] -- current bots/v1 with DEBUG on (plus visible camp HP) as team A; cleaned trace in work/runs/tr-MAP/a.txt
 S="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 R="$(cd "$S/../.." && pwd)"
 m=$1; o=${2:-tribfix}
-"$S/mkpatch.sh" tprobe hplog >/dev/null
+"$S/mkpatch.sh" tprobe hplog ${EXTRA} >/dev/null
 export CAMBC_WASMTIME_CACHE=${CAMBC_WASMTIME_CACHE:-$S/work/wtcache}
 d="$S/work/runs/tr-$m"; rm -rf "$d"; mkdir -p "$d"; cd "$R"
 opp="$S/bots/$o"; [ -d "$opp" ] || opp="$R/bots/$o"

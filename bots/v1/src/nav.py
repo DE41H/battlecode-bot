@@ -100,7 +100,7 @@ def step_away(knowledge, threats, radius):
 
 
 def dash_towards(knowledge, ability, goals):
-    """Spend a dash on travel if it brings us strictly closer to the goals."""
+    """Spend a dash on travel if it brings us strictly closer to the goals, never landing a hit on a camp."""
     me = cambc.me()
     origin = me.position()
     if goals.is_set(origin):
@@ -112,6 +112,10 @@ def dash_towards(knowledge, ability, goals):
     if here >= 65535 or here <= 2:
         return False
     landing = tiles_around(origin, 2) & ~blocked
+    info = ability.info()
+    if info is not None and (info.modifier > 0 or info.duration > 0):
+        # Landing damage wakes any camp group it touches; keep dashes clear of armed camps.
+        landing &= ~knowledge.armed_within(int(info.radius))
     best = min(landing.positions(), key=field.get, default=None)
     if best is None or field.get(best) > here - 2:
         return False

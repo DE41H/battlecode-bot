@@ -18,6 +18,17 @@ def _alive(target):
         return False
 
 
+def splashes(me, target, avoid):
+    """Whether Varg's basic-attack splash on target would reach a tile in avoid."""
+    if avoid is None or me.champion_name() != cambc.ChampionType.VARG:
+        return False
+    area = cambc.Bitboard()
+    area.draw_chebyshev(
+        target.position(), cambc.constants.passive_abilities.VARG_SPLASH_RADIUS
+    )
+    return not (area & avoid).is_empty()
+
+
 def basic_attack(target):
     """Hit the target with a basic attack, chaining an attack reset if we have one ready."""
     me = cambc.me()
@@ -38,8 +49,11 @@ def basic_attack(target):
     return True
 
 
-def cast_damage(targets, allow_exclusive=True):
-    """Cast our strongest ready damaging spell on the most valuable target in range."""
+def cast_damage(targets, allow_exclusive=True, avoid=None):
+    """Cast our strongest ready damaging spell on the most valuable target in range.
+
+    Area spells whose blast would reach a tile in avoid are skipped, so farming never wakes a neighbouring camp.
+    """
     me = cambc.me()
     best = None
     for ability in me.abilities():
@@ -54,9 +68,15 @@ def cast_damage(targets, allow_exclusive=True):
         if modifier <= 0 and not ability.is_cc():
             continue
         reach = int(getattr(info, "range", 0))
+        blast = getattr(info, "radius", 0) if ability.is_aoe_damage() else None
         for target in targets:
             if not _alive(target) or not _in_range(me, target, reach):
                 continue
+            if blast is not None and avoid is not None:
+                area = cambc.Bitboard()
+                area.draw_chebyshev(target.position(), blast)
+                if not (area & avoid).is_empty():
+                    continue
             # Prefer damage, then the lowest-health target so kills land sooner.
             key = (modifier, -target.health())
             if best is None or key > best[0]:

@@ -126,10 +126,8 @@ class Bot:
         ]
         hostile_camps = [
             camp
-            for camp in cambc.vision.camps()
-            if _alive(camp)
-            and camp.strength() > 0
-            and camp.health() < camp.max_health()
+            for camp, _, hp in k.seen
+            if hp > 0 and camp.strength() > 0 and hp < camp.max_health()
         ]
 
         if self.place_altar_lock(enemies):
@@ -170,6 +168,7 @@ class Bot:
                 me.gem_count() > 0
                 and k.nearest_altar_distance(position) <= 2
                 and not enemies
+                and k.open_altars()
             ):
                 self.bank()
                 return "low-bank"
@@ -225,10 +224,13 @@ class Bot:
     # --------------------------------------------------------------- banking
 
     def usable_altars(self):
+        """Open altars without an enemy lock (all open ones if every one is locked), as indices into k.altars."""
         k = self.k
         assert k is not None
+        open_altars = k.open_altars()
         altars = []
-        for altar in k.altars:
+        for i in open_altars:
+            altar = k.altars[i]
             try:
                 if (
                     cambc.vision.has_altar_lock(altar)
@@ -237,8 +239,8 @@ class Bot:
                     continue
             except cambc.Error:
                 pass
-            altars.append(altar)
-        return altars or k.altars
+            altars.append(i)
+        return altars or open_altars
 
     def should_bank(self, enemies):
         me = cambc.me()
@@ -246,6 +248,10 @@ class Bot:
         if gems <= 0:
             return False
         k = self.k
+        assert k is not None
+        # Nowhere to tribute until a gate group dies: keep farming (and fighting the gate) instead.
+        if not k.open_altars():
+            return False
         assert k is not None
         position = me.position()
         altar_distance = k.nearest_altar_distance(position)
@@ -275,9 +281,12 @@ class Bot:
     def bank(self):
         me = cambc.me()
         position = me.position()
+        k = self.k
+        assert k is not None
         reach = cambc.constants.SUBMIT_GEMS_RANGE
         altars = self.usable_altars()
-        for altar in altars:
+        for i in altars:
+            altar = k.altars[i]
             if position.chebyshev_distance(altar) <= reach:
                 try:
                     me.submit_gems(altar)
@@ -285,9 +294,12 @@ class Bot:
                 except cambc.Error:
                     continue
         goals = cambc.Bitboard()
-        for altar in altars:
-            goals |= nav.tiles_around(altar, reach)
-        nav.step_towards(self.k, goals)
+        for i in altars:
+            goals |= k.altar_spots[i]
+        if goals.is_empty():
+            for i in altars:
+                goals |= nav.tiles_around(k.altars[i], reach)
+        nav.step_towards(k, goals)
 
     # ------------------------------------------------------------------ PvP
 
@@ -345,7 +357,7 @@ class Bot:
                     continue
             except cambc.Error:
                 continue
-            for altar in k.altars:
+            for altar in k.all_altars:
                 if (
                     altar.chebyshev_distance(enemy.position())
                     > cambc.constants.SUBMIT_GEMS_RANGE
@@ -367,11 +379,8 @@ class Bot:
     def target_camps(self):
         if self.target is None:
             return []
-        return [
-            camp
-            for camp in cambc.vision.camps()
-            if int(camp.camp_group()) == self.target and _alive(camp)
-        ]
+        target = self.target
+        return [camp for camp, index, hp in self.k.seen if index == target and hp > 0]
 
     def choose_target(self):
         me = cambc.me()
@@ -387,7 +396,8 @@ class Bot:
         for slot, claim in enumerate(memory.read_claims()):
             if claim is not None and slot != self.slot:
                 others_on[claim] = others_on.get(claim, 0) + 1
-        late = now >= 700
+        # While every altar is shut behind a gate group, gems cannot score: keep valuing gold, the tiebreak.
+        late = now >= 700 and bool(k.open_altars())
         available, remaining, avoid = k.available, k.remaining, k.avoid
         capture_time = k.capture_time
         current = self.target
@@ -411,11 +421,12 @@ class Bot:
             kill = remaining[index] / (dps * team)
             travel = max(abs(cx - px), abs(cy - py)) * 1.25
             wait = max(available[index], avoid[index]) - now - travel
-            # Camps die one at a time and spread their hits, so a clear costs about a quarter of strength x kill time.
+            # Camps die one at a time and spread their hits, so a clear costs well under strength x kill time
+            # (0.4 is best on engine 1.0.0: 218/294 vs 202 at 0.25 and 180 at 0.15).
             busy = (
                 travel
                 + kill
-                + 0.25 * strength * kill / team / budget * trip_cost
+                + 0.4 * strength * kill / team / budget * trip_cost
                 + fixed
             )
             if wait > 0:
@@ -470,7 +481,8 @@ class Bot:
 
         # Group in view with no living camps: capture if the reward is up, otherwise move on.
         visible = cambc.vision.visible_tiles()
-        if not (info.tiles & visible).is_empty():
+        in_view = not (info.tiles & visible).is_empty()
+        if in_view:
             if k.reward_ready[self.target]:
                 self.capture(info)
                 return "capture"
@@ -480,12 +492,16 @@ class Bot:
                 if self.target is None:
                     return "idle"
                 info = k.groups[self.target]
+                in_view = not (info.tiles & visible).is_empty()
 
         # Never wait on spawn tiles: an occupied spawn tile freezes the whole group's respawn.
+        # A group due back but still empty is held up by someone on its tiles, quite possibly us.
         position = cambc.me().position()
-        if k.available[self.target] > now:
-            goals = _ring(info) & ~info.tiles
-            if info.tiles.is_set(position) or not goals.is_set(position):
+        if k.available[self.target] > now or (
+            in_view and not k.reward_ready[self.target]
+        ):
+            goals = _ring(info) & ~k.spawn_tiles
+            if k.spawn_tiles.is_set(position) or not goals.is_set(position):
                 self.travel(goals)
             return "wait"
         self.travel(info.tiles | _ring(info))
@@ -568,19 +584,29 @@ class Bot:
             nav.step_away(self.k, [camp.position() for camp in camps], 4)
             return
 
-        target = min(camps, key=lambda camp: camp.health())
+        # Never splash a neighbouring armed group awake (01gold-rush's monolith sits beside its gold).
+        avoid = self.k.collateral(self.target) if self.target is not None else None
+        target = min(
+            camps,
+            key=lambda camp: (combat.splashes(me, camp, avoid), camp.health()),
+        )
+        if combat.splashes(me, target, avoid):
+            # Every hit we have would splash; leave the rest of this group to someone without splash.
+            self.k.avoid[self.target] = cambc.round_number() + CONTEST_BACKOFF
+            self.target = None
+            return
         if combat.basic_attack(target):
-            combat.cast_damage(camps)
+            combat.cast_damage(camps, avoid=avoid)
             return
 
-        cast = combat.cast_damage(camps)
+        cast = combat.cast_damage(camps, avoid=avoid)
         if me.can_move():
             nav.step_towards(
                 self.k, nav.tiles_around(target.position(), me.attack_range())
             )
         combat.basic_attack(target)
         if not cast:
-            combat.cast_damage(camps)
+            combat.cast_damage(camps, avoid=avoid)
 
 
 def _ring(info):
