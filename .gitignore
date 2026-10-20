@@ -8,3 +8,4 @@ bots/*/target/
 .vscode/
 .opencode/
 *.zip
+bots/v4/.cache/clangd/index/
