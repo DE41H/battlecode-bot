@@ -77,6 +77,8 @@ class Knowledge:
             self.altar_spots = [cambc.Bitboard() for _ in self.altars]
             self.altar_gates = [[] for _ in self.altars]
         self.gates = {index for gates in self.altar_gates for index in gates}
+        # Enemy altar locks as last seen, per altar index.
+        self.locked = [False] * len(self.altars)
         # Spawn tile -> group index; camp.camp_group() rebuilds the whole group and costs ~20k fuel a call.
         self.group_at = {
             (p.x, p.y): info.index for info in self.groups for p in info.positions

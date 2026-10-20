@@ -284,18 +284,20 @@ class Bot:
         k = self.k
         assert k is not None
         open_altars = k.open_altars()
+        visible = cambc.vision.visible_tiles()
         altars = []
         for i in open_altars:
             altar = k.altars[i]
-            try:
-                if (
-                    cambc.vision.has_altar_lock(altar)
-                    and cambc.vision.altar_lock_at(altar).is_enemy()
-                ):
-                    continue
-            except cambc.Error:
-                pass
-            altars.append(i)
+            if visible.is_set(altar):
+                try:
+                    k.locked[i] = (
+                        cambc.vision.has_altar_lock(altar)
+                        and cambc.vision.altar_lock_at(altar).is_enemy()
+                    )
+                except cambc.Error:
+                    k.locked[i] = False
+            if not k.locked[i]:
+                altars.append(i)
         return altars or open_altars
 
     def should_bank(self, enemies):
