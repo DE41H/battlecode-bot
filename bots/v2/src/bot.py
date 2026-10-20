@@ -183,7 +183,10 @@ class Bot:
                 self.bank()
                 return "low-bank"
             if not threats:
-                me.recall()
+                try:
+                    me.recall()
+                except cambc.Error:
+                    return "stunned"
                 self.healing = True
                 return "low-recall"
             # Walking away from a chaser only feeds it free hits, so trade back while we still can.
@@ -212,7 +215,8 @@ class Bot:
             pressing = [
                 enemy
                 for enemy in near
-                if position.chebyshev_distance(enemy.position())
+                if _alive(enemy)
+                and position.chebyshev_distance(enemy.position())
                 <= max(enemy.attack_range(), 4) + 1
             ]
             if pressing:
@@ -385,6 +389,8 @@ class Bot:
         burst = combat.burst_estimate(me)
         worth = []
         for enemy in enemies:
+            if not _alive(enemy):
+                continue
             try:
                 gems = enemy.gem_count()
             except cambc.Error:

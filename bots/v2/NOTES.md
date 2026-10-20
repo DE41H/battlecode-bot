@@ -133,9 +133,29 @@ Fix: an enemy within `max(its attack range, 4) + 1` of us is fought when the rat
 
 On the 8-opponent pool without v2/c4: 314/336 (v2: 288), better on 18 of 21 maps; elk_arena 12/16 → 16/16, contest 13 → 16, big-world 13 → 16. 0.5 is in `bots/v2`.
 
+Submitted 2026-10-20 12:03 UTC as **version 14** (commit efd361b). First 20 ranked games: 14 won (versions 12–13: 45/80); median deaths 19 vs the opponents' 19.5 (before: 27 vs 15.5); in losses 29.5 vs 8.5 (before: 49 vs 11). Rank 295 → 240 (rating 1,586) by 12:48 UTC. Still lost: elkring 0/2, eight 0/1, lanes 0/1 (small samples).
+
+## Spending more fuel (2026-10-20 evening): no gain yet
+
+Profile of v2 vs c5 (share of champion turns): engage 19.6%, travel 19.2%, dead 18.7% (Cassi & Issac 28.4%), wait 12.0%, capture 7.8%, bank 7.6%, channel 4.9%, fights ~8%.
+
+Pool: c5, c4, safe, c3, c2, v7, invader, monoallow, goldrush (378 games); baseline = version 14.
+
+| Variant | Wins | Deaths/game | vs v2 |
+|---|---|---|---|
+| version 14 | 327 | 23.0 | 21/42 |
+| `realdist`: walking distances (spawn field + one field from all tribute spots, first turn) for scoring and banking | 323 | 22.2 | 23/42 |
+| `replan`: re-plan every 3 rounds (was 10) and refine 6 candidates (was 3) | **292** | 21.4 | 20/42 |
+| `realdist` + `replan` | 292 | 19.9 | 23/42 |
+| `fightsim` + `robust`: simulate the local fight (kit damage estimates, arrival delays, focus on the weakest) instead of the Lanchester product | 322 | 24.4 | 21/42 |
+| **`robust`**: skip enemies that left vision mid-turn; catch a refused recall while stunned | **330** | 23.0 | 21/42 |
+
+More frequent re-planning clearly hurts: champions switch between near-equal targets and waste the travel. The others are within noise. Python `DistanceField.compute` costs up to 800k fuel on big maps, so per-turn full-map searches are not affordable. `robust` is in `bots/v2` (not submitted); the rest stay as patches.
+
 ## Next
 
-- Watch ranked results after submitting `pressed`; elk_arena, eight and lanes were the worst ranked maps.
+- Keep watching ranked results; elkring, eight and lanes are still the weak maps.
+- Use more of the fuel budget (median use is 28%): fight lookahead and richer target scoring are the obvious places.
 - Farming speed: Mommy Shogun beat us on `corners` and `elkring` with 0–2 deaths, so the gap there is pure farming, not fighting.
 - Team fights on `hooks`/`contest`: grouping heuristics keep losing locally; our pool may simply not reward them (every pool bot trickle-feeds too).
 - Deaths are still 27/game locally. Mommy-style avoidance (use ward sightings to leave a camp before the enemy arrives) is the untested half of the "safe farmer".
