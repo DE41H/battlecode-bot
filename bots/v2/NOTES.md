@@ -152,8 +152,46 @@ Pool: c5, c4, safe, c3, c2, v7, invader, monoallow, goldrush (378 games); baseli
 
 More frequent re-planning clearly hurts: champions switch between near-equal targets and waste the travel. The others are within noise. Python `DistanceField.compute` costs up to 800k fuel on big maps, so per-turn full-map searches are not affordable. `robust` is in `bots/v2` (not submitted); the rest stay as patches.
 
+## Camp deaths and last stands (2026-10-21)
+
+The pool grew to **35 maps** (14 new: packs, pilgrimage, quadrants, reverse-spiral, rows, rushbait-v2, split, stampede, swirl, shortcut, starfish, starvation, the-farm, yellow-brick-road) and the engine to 1.0.1; `uv tool upgrade cambc` (3.0.2), `cambc init --yes .` (then delete the starter bots it scaffolds into `bots/`), `cambc maps pull`. Rank 223 (1,597), 48 of the last 100 ranked games won.
+
+Ladder losses (52 of 100): **39 lost on fights** (median deaths 38 vs 12), 6 on farming, 7 close. Gold follows survival (whoever dies more farms less), so there is no separate gold problem. Deaths bleed steadily all game (about 3.3 per 200 rounds vs their 1.0), not in one opening brawl. Kills and assists: we die to 2.2 enemies on average (31% are 1-v-1), they die to 2.8 of ours, so the issue is losing trades, not only being outnumbered. **Camps killed us 8 times a game (opponents 4.4)**; 20 a game on `00rows`, where Varg died at the centre monolith pair (470 gems, 400 strength) every ~112 rounds. Cassi & Issac die together 10.5 times per lost game.
+
+Traced local games (`DEBUG` on, joined to the statistics JSON's death events) gave the causes:
+
+- `engage()` left a camp when health < 2 × awake strength, but camps (range 3, no chasing) keep hitting while a melee champion walks the 3 tiles out.
+- "Hostile camp" meant a *damaged* camp, so full-health members of a woken group were invisible to the low-health logic: champions started a recall, a hit cancelled it, and they restarted until dead (`low-recall` was the last mode before most camp deaths).
+- On `01corridors` the camps sit behind a bush row; camps see through bushes and we do not, so unseen camps did the same.
+- Champion kills: the commonest path was `fight` → `last-stand` → dead (the last stand traded back against anyone pressing, winnable or not).
+
+Fixes (patches `campsafe`, `campaware`, `stand`, `unseen`, all in `bots/v2`):
+
+- `engage()`: stay only while health > incoming × (steps to leave range + 1); incoming = every armed camp of the target group plus other awake camps within range + 1. Otherwise step away and drop the group for `CAMP_BACKOFF` (20) rounds.
+- Hostile camps = armed camps on `vision.awake_camp_tiles()`.
+- Low health and hit this turn: armed camp tiles within 4 count as threats even unseen, and we never start a recall that turn (`low-hit` if nothing is known).
+- Last stand only against an enemy with health ≤ `STAND_BURSTS` (3) × our burst; otherwise keep backing off.
+
+Pool: all 35 maps × both sides (70 games per opponent). c6 = `bots/v2` at 437070e (version 14 + `robust`).
+
+| Variant | vs c5 | vs v4 | vs c6 | Deaths/game (camp) vs c5+v4 |
+|---|---|---|---|---|
+| c6 | 43 | 31 | — | 33.5 (9.0) |
+| `campsafe` margin 1 | 41 | 37 | 29 | 31.0 (7.1) |
+| `campsafe` margin 0 / no back-off | 40 / 36 | 32 / 32 | 26 / 28 | |
+| + `campaware` | 43 | 37 | 32 | 29.8 (5.7) |
+| + `stand` 2 × burst | 48 | 39 | 41 | 22.2 (5.5) |
+| + `stand` 1 × / 3 × / never | 45 / 50 / 35 | 34 / 35 / 26 | 33 / 44 / 30 | |
+| **+ `unseen` (3 ×) = `bots/v2`** | **49** | **35** | **42** | **20.0 (5.1)** |
+
+The last stand matters both ways: never trading back (91/210) is worse than always (112), and trading only when the kill is in reach is best (128–129). `unseen` vs the 3 × variant head-to-head: 39/70; corridors camp deaths 111 → 74. Against the old `safe` and `c3` nothing changed (107/140 vs c6's 108): they were already beaten. Fight-entry thresholds on top (`edge` patch: `FIGHT_EDGE` 1.0 / 0.65, `PRESS_EDGE` 0.7) were all within noise (122, 124, 119 of 210 vs c5, v4 and the new v2).
+
+The teammate's C++ `bots/v4` (a port of v2) beat c6 39–31; the new v2 is even with it (35/70). `evalbots.py` now prints camp deaths per side (`deaths a-b (camp x-y)`).
+
 ## Next
 
+- Watch the ladder after submitting: camp deaths per game (was 8) and deaths in losses (was 38).
+- Remaining camp deaths (5/game) are on corridors, fracture, the-farm, shortcut: travelling past awake camps. Route around awake-camp range in `step_towards`.
 - Keep watching ranked results; elkring, eight and lanes are still the weak maps.
 - Use more of the fuel budget (median use is 28%): fight lookahead and richer target scoring are the obvious places.
 - Farming speed: Mommy Shogun beat us on `corners` and `elkring` with 0–2 deaths, so the gap there is pure farming, not fighting.

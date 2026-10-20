@@ -130,6 +130,8 @@ class Knowledge:
         self.avoid = [0] * len(self.groups)
         # This turn's visible camps as (camp, group index, health), filled by observe.
         self.seen = []
+        # Tiles of this turn's visible awake camps, filled by Bot.decide.
+        self.awake = cambc.Bitboard()
 
     def scoring_table(self, zones):
         """Static per-group terms for target scoring, as flat tuples for a cheap inner loop."""

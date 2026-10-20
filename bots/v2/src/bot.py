@@ -26,6 +26,10 @@ PRESS_EDGE = 0.5
 CONTEST_TURNS = 4
 CONTEST_BACKOFF = 30
 SHOP_GOLD = 150
+# A camp group we cannot finish without dying is dropped for this many rounds.
+CAMP_BACKOFF = 20
+# A last stand only against an enemy we can kill within this many of our bursts.
+STAND_BURSTS = 3.0
 CANDIDATES = 3
 # Rounds we hold off banking after being hit by an attacker we cannot see.
 AMBUSH_BACKOFF = 10
@@ -134,10 +138,13 @@ class Bot:
         enemies = [
             enemy for enemy in cambc.vision.champions(Team.ENEMY) if _alive(enemy)
         ]
+        # Awake, armed camps: a hit on any camp wakes its whole group, full-health members included.
+        awake = cambc.vision.awake_camp_tiles()
+        k.awake = awake
         hostile_camps = [
             camp
             for camp, _, hp in k.seen
-            if hp > 0 and camp.strength() > 0 and hp < camp.max_health()
+            if hp > 0 and camp.strength() > 0 and awake.is_set(camp.position())
         ]
 
         if self.place_altar_lock(enemies):
@@ -174,6 +181,12 @@ class Bot:
                 for c in hostile_camps
                 if position.chebyshev_distance(c.position()) <= 4
             ]
+            if damage > 0:
+                # A camp behind a bush or wall can hit us unseen; any hit would cancel a recall anyway.
+                threats += (nav.tiles_around(position, 4) & k.armed).positions()
+                if not threats:
+                    nav.step_towards(k, k.ally_spawn)
+                    return "low-hit"
             if (
                 me.gem_count() > 0
                 and k.nearest_altar_distance(position) <= 2
@@ -190,11 +203,13 @@ class Bot:
                 self.healing = True
                 return "low-recall"
             # Walking away from a chaser only feeds it free hits, so trade back while we still can.
+            burst = combat.burst_estimate(me) * STAND_BURSTS
             pressing = [
                 enemy
                 for enemy in enemies
                 if position.chebyshev_distance(enemy.position())
                 <= enemy.attack_range() + 1
+                and enemy.health() <= burst
             ]
             if pressing and self.fight_enemies(pressing, aggressive=True):
                 return "last-stand"
@@ -653,14 +668,30 @@ class Bot:
         )
         combat.support_spells(self.k, under_fire)
 
-        # Back off before a camp kills us; it falls asleep two rounds after we leave.
-        incoming = sum(
-            camp.strength()
-            for camp in camps
-            if _alive(camp) and camp.health() < camp.max_health()
-        )
-        if incoming > 0 and me.health() < incoming * 2:
-            nav.step_away(self.k, [camp.position() for camp in camps], 4)
+        # Camps do not chase but hit until we leave their range, so stay only while we can take every hit
+        # on the way out, plus one. Hitting the target wakes all of it; other camps count once awake.
+        reach = me.attack_range()
+        incoming, escape, threats = 0.0, 1, []
+        for camp, index, hp in self.k.seen:
+            if hp <= 0:
+                continue
+            strength = camp.strength()
+            if strength <= 0 or (
+                index != self.target and not self.k.awake.is_set(camp.position())
+            ):
+                continue
+            span = camp.attack_range() + 1
+            distance = position.chebyshev_distance(camp.position())
+            if index != self.target and distance > span:
+                continue
+            incoming += strength
+            threats.append(camp.position())
+            escape = max(escape, span - min(distance, reach))
+        if incoming > 0 and me.health() <= incoming * (escape + 1):
+            nav.step_away(self.k, threats, 4)
+            if self.target is not None:
+                self.k.avoid[self.target] = cambc.round_number() + CAMP_BACKOFF
+                self.target = None
             return
 
         # Never splash a neighbouring armed group awake (01gold-rush's monolith sits beside its gold).
