@@ -203,6 +203,8 @@ Fix (`campmeasure`, in `bots/v2`): once awake camps hit us, stay only while heal
 | `cmsoft` | 46 | 42 | 46 | 37 | | | |
 | **`bots/v2`** | **51** | **40** | **55** | 34 | **139** | 13 | **1,323** |
 
+Submitted 2026-10-21 as **version 17** (commit 1553e00 plus this note).
+
 Lesson: **always include passive opponents** (`starter-python`, `goldrush-bot`) and look for stalls (our gold < 25% of theirs with few deaths, or 2,000-round games), not only win totals. c7 = version 16 snapshot.
 
 ## Next
