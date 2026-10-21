@@ -9,3 +9,4 @@ bots/*/target/
 .opencode/
 *.zip
 bots/v4/.cache/clangd/index/
+bots/v2/src/__pycache__/
