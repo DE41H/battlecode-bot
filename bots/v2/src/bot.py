@@ -28,6 +28,8 @@ CONTEST_BACKOFF = 30
 SHOP_GOLD = 150
 # A camp group we cannot finish without dying is dropped for this many rounds.
 CAMP_BACKOFF = 20
+# After backing off a camp group below this health fraction, heal at home before the next one.
+MEND_HEALTH = 0.6
 # A last stand only against an enemy we can kill within this many of our bursts.
 STAND_BURSTS = 3.0
 CANDIDATES = 3
@@ -58,6 +60,9 @@ class Bot:
         self.contested = 0
         # Health at the start of our last turn, to measure damage taken since.
         self.last_health = None
+        self.damage = 0.0
+        # Set after backing off a camp group hurt: heal at home before the next one.
+        self.mend = False
         self.bank_after = 0
 
     def setup(self):
@@ -114,6 +119,7 @@ class Bot:
             0.0 if self.last_health is None else max(0.0, self.last_health - health)
         )
         self.last_health = health
+        self.damage = damage
 
         if me.is_submitting_gems():
             # Damage does not stop a tribute, so a carrier under fire can die a turn short and hand the killer its whole bag.
@@ -127,6 +133,8 @@ class Bot:
 
         position = me.position()
         at_spawn = k.ally_spawn.is_set(position)
+        if at_spawn:
+            self.mend = False
         if at_spawn or me.champion_name() == Kind.TAVI:
             shop()
 
@@ -170,6 +178,8 @@ class Bot:
         # Low health: recall if nothing can interrupt it, otherwise back off first.
         linked = me.champion_name() in (Kind.CASSI, Kind.ISSAC)
         low = LINKED_LOW_HEALTH if linked else LOW_HEALTH
+        if self.mend:
+            low = max(low, MEND_HEALTH)
         if not at_spawn and me.health() < me.max_health() * low:
             threats = [
                 e.position()
@@ -511,6 +521,8 @@ class Bot:
         ) in k.scoring:
             if late and late_value <= 0:
                 continue
+            if avoid[index] > now:
+                continue
             team = 1 + others_on.get(index, 0)
             kill = remaining[index] / (dps * team)
             travel = max(abs(cx - px), abs(cy - py)) * 1.25
@@ -668,27 +680,29 @@ class Bot:
         )
         combat.support_spells(self.k, under_fire)
 
-        # Camps do not chase but hit until we leave their range, so stay only while we can take every hit
-        # on the way out, plus one. Hitting the target wakes all of it; other camps count once awake.
+        # Camps do not chase but hit until we leave their range, so once they hit us, stay only while we can
+        # take as much again for every step out, plus one.
         reach = me.attack_range()
         incoming, escape, threats = 0.0, 1, []
-        for camp, index, hp in self.k.seen:
-            if hp <= 0:
+        for camp, _, hp in self.k.seen:
+            if hp <= 0 or not self.k.awake.is_set(camp.position()):
                 continue
             strength = camp.strength()
-            if strength <= 0 or (
-                index != self.target and not self.k.awake.is_set(camp.position())
-            ):
-                continue
             span = camp.attack_range() + 1
             distance = position.chebyshev_distance(camp.position())
-            if index != self.target and distance > span:
+            if strength <= 0 or distance > span:
                 continue
             incoming += strength
             threats.append(camp.position())
             escape = max(escape, span - min(distance, reach))
-        if incoming > 0 and me.health() <= incoming * (escape + 1):
+        # Measured damage already counts our items and which camps actually reach us.
+        if threats and (
+            me.health() <= incoming
+            or (self.damage > 0 and me.health() <= self.damage * (escape + 1))
+        ):
             nav.step_away(self.k, threats, 4)
+            if me.health() < me.max_health() * MEND_HEALTH:
+                self.mend = True
             if self.target is not None:
                 self.k.avoid[self.target] = cambc.round_number() + CAMP_BACKOFF
                 self.target = None

@@ -188,9 +188,27 @@ The last stand matters both ways: never trading back (91/210) is worse than alwa
 
 The teammate's C++ `bots/v4` (a port of v2) beat c6 39–31; the new v2 is even with it (35/70). `evalbots.py` now prints camp deaths per side (`deaths a-b (camp x-y)`).
 
+## Version 16 regression: freezes at groups we refuse (2026-10-21)
+
+Submitted 2026-10-20 22:55 UTC as **version 16** (commit 2ded1ca; version 15 was someone else's upload). First 85 ranked games: 51% won (v14: 48%), deaths 30.8/game (31.9), and **camp deaths 9.6/game (v14: 8.1)**, worst on monolith maps: rows 26.5 a game (local 2.8), contest 23 (0.2), boss-battle 26.7 (7.2), monolith 10 (0.8).
+
+Cause: `campsafe` summed every armed camp of the target group at full strength, so champions refused groups they could clear (only camps within range 3 hit, and Jungle/Durability cut camp damage by a third), or groups they could not clear at mid health without being low enough to go home. The back-off only added a waiting cost to the score, so the next re-plan picked the same group again. Champions froze for the rest of the game: v16 vs `starter-python` on `00rows`, all five stood at the centre monoliths from round ~1000 and lost 289–353; `01boss-battle` as team A earned 0 gold. Our local lineage opponents fight over those groups, which breaks the loop, so the local pool hid it; ladder winners leave monoliths alone, like the passive bots.
+
+Fix (`campmeasure`, in `bots/v2`): once awake camps hit us, stay only while health > **measured** damage last turn × (steps out + 1) (or health ≤ the in-range strength, for the first hit); after such a retreat below `MEND_HEALTH` (0.6), heal at home before the next group; groups under `avoid` are skipped outright in `choose_target` (`cmsoft`, the soft version, was worse).
+
+| Bot | vs c5 | vs v4 | vs c6 (v14) | vs c7 (v16) | vs starter + goldrush (140) | 2,000-round games vs passive | Median rounds vs passive |
+|---|---|---|---|---|---|---|---|
+| c6 (v14) | 43 | 31 | — | | 138 | 14 | 1,376 |
+| c7 (v16) | 49 | 35 | 42 | — | **132** (rows lost 4/4) | **31** | 1,441 |
+| `cmsoft` | 46 | 42 | 46 | 37 | | | |
+| **`bots/v2`** | **51** | **40** | **55** | 34 | **139** | 13 | **1,323** |
+
+Lesson: **always include passive opponents** (`starter-python`, `goldrush-bot`) and look for stalls (our gold < 25% of theirs with few deaths, or 2,000-round games), not only win totals. c7 = version 16 snapshot.
+
 ## Next
 
 - Watch the ladder after submitting: camp deaths per game (was 8) and deaths in losses (was 38).
+- `00rushbait-v2` as team B loses to `starter-python` in every version (v14 too): trace it.
 - Remaining camp deaths (5/game) are on corridors, fracture, the-farm, shortcut: travelling past awake camps. Route around awake-camp range in `step_towards`.
 - Keep watching ranked results; elkring, eight and lanes are still the weak maps.
 - Use more of the fuel budget (median use is 28%): fight lookahead and richer target scoring are the obvious places.
